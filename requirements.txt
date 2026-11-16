@@ -1,0 +1,8 @@
+﻿spotipy
+python-dotenv
+mongita
+spotifyscraper
+pymongo
+flask
+
+

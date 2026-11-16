@@ -1,0 +1,6 @@
+﻿/.venv/
+/.cache
+/downloads
+/.idea
+/database
+secrets.env
