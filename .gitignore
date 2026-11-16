@@ -4,3 +4,5 @@
 /.idea
 /database
 secrets.env
+__pycache__/
+*.pyc

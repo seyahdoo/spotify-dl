@@ -1,12 +1,27 @@
 ﻿services:
   main:
     build: .
+    restart: unless-stopped
     volumes:
       - /mnt/spotify-dl:/mnt/spotify-dl
+    env_file:
+      - secrets.env
+    environment:
+      MONGODB_URI: mongodb://root:example@mongo:27017/
+      DOWNLOADS_FOLDER: /mnt/spotify-dl
+    depends_on:
+      - mongo
   flask-ui:
     build: flask-ui
+    restart: unless-stopped
     ports: 
       - 8000:8000
+    env_file:
+      - secrets.env
+    environment:
+      MONGODB_URI: mongodb://root:example@mongo:27017/
+    depends_on:
+      - mongo
   mongo:
     image: mongo
     restart: always

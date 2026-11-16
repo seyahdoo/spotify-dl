@@ -1,12 +1,45 @@
-﻿from flask import Flask, render_template_string
+﻿"""Read-only web dashboard for the spotidl download worker.
+
+Shows live progress and the tracks currently being downloaded. Configuration
+is read from the environment (a ``secrets.env`` file is loaded when present).
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+
 import pymongo
 from bson import json_util
+from dotenv import load_dotenv
+from flask import Flask, Response, render_template_string
+
+load_dotenv("secrets.env")
+
+LOGGER = logging.getLogger("spotidl.ui")
+
+MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017/")
+MONGODB_DB_NAME = os.environ.get("MONGODB_DB_NAME", "db")
+FLASK_HOST = os.environ.get("FLASK_HOST", "0.0.0.0")
+FLASK_PORT = int(os.environ.get("FLASK_PORT", "8000"))
+FLASK_DEBUG = os.environ.get("FLASK_DEBUG", "false").lower() in {"1", "true", "yes"}
+
+# Must match STATUS_CONFIG in the dashboard template.
+STATUS_KEYS = (
+    "ready_to_start",
+    "downloading",
+    "errored",
+    "not_found",
+    "missing_in_disk",
+    "found_in_disk",
+    "done",
+)
 
 app = Flask(__name__)
 
-pymongo_client = pymongo.MongoClient("mongodb://root:example@192.168.1.42:27017/", 27017)
-pymongo_db = pymongo_client.db
-songs_collection:pymongo.collection.Collection = pymongo_db.songs_collection
+pymongo_client = pymongo.MongoClient(MONGODB_URI, serverSelectionTimeoutMS=10_000)
+pymongo_db = pymongo_client[MONGODB_DB_NAME]
+songs_collection: pymongo.collection.Collection = pymongo_db.songs_collection
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -326,18 +359,16 @@ HTML_TEMPLATE = """
 
 
 def get_dashboard_data():
-    # Direct count_documents calls matching your original code
-    stats = {
-        "ready_to_start": songs_collection.count_documents({"status": "ready_to_start"}),
-        "downloading": songs_collection.count_documents({"status": "downloading"}),
-        "errored": songs_collection.count_documents({"status": "errored"}),
-        "not_found": songs_collection.count_documents({"status": "not_found"}),
-        "missing_in_disk": songs_collection.count_documents({"status": "missing_in_disk"}),
-        "found_in_disk": songs_collection.count_documents({"status": "found_in_disk"}),
-        "done": songs_collection.count_documents({"status": "done"}),
-    }
-
-    downloading_songs = list(songs_collection.find({"status": "downloading"}))
+    try:
+        stats = {
+            status: songs_collection.count_documents({"status": status})
+            for status in STATUS_KEYS
+        }
+        downloading_songs = list(songs_collection.find({"status": "downloading"}))
+    except pymongo.errors.PyMongoError as exc:
+        LOGGER.error("Failed to read dashboard data: %s", exc)
+        stats = {status: 0 for status in STATUS_KEYS}
+        downloading_songs = []
     return stats, downloading_songs
 
 
@@ -354,11 +385,15 @@ def index():
 @app.route("/api/status")
 def api_status():
     stats, downloading_songs = get_dashboard_data()
-    return json_util.dumps({
-        "stats": stats,
-        "downloading_songs": downloading_songs
-    })
+    return Response(
+        json_util.dumps({"stats": stats, "downloading_songs": downloading_songs}),
+        mimetype="application/json",
+    )
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG)
